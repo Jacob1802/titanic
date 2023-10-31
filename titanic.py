@@ -10,50 +10,35 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 import xgboost as xgb
 import lightgbm as lgb
+from sklearn.model_selection import GridSearchCV
 
 
 def main():
     df = pd.read_csv('train.csv')
     test_df = pd.read_csv("test.csv")
-    print(df.tail())
-    print(test_df.tail())
+
     # ['PassengerId', 'Survived', 'Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch', 'Ticket', 'Fare', 'Cabin', 'Embarked']
     # ['num_family_onboard', 'age_category_code', 'is_alone']
-    features = ['Pclass', 'Sex_code', 'age_category_code', 'is_alone', 'title_code']
+    features = ['Pclass', 'Sex_code', 'is_alone']
 
     df = feature_engineer(df)
     test_df = feature_engineer(test_df)
     df, test_df = encode_data(df, test_df, None)
 
-    print(df.tail())
-    print(test_df.tail())
     X = df[features]
     y = df["Survived"]
 
     X_test = test_df[features]
     # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
-    # lgb.LGBMClassifier
-    models = [lgb.LGBMClassifier, LogisticRegression, xgb.XGBClassifier, RandomForestClassifier, DecisionTreeClassifier]
+    # Create the RandomForestClassifier
+    rf = RandomForestClassifier(random_state=42, max_depth=10, n_estimators=100, min_samples_split=2)
 
-    for m in models:
-        model = m()
-        model.fit(X, y)
-        # model.fit(X_train, y_train)
-        pred = model.predict(X_test)
-
-        # print(f"{m.__name__}: Acc: {accuracy_score(y_test, pred)}")
-        # print(f"{m.__name__}: Prec: {precision_score(y_test, pred)}")
-        # print(f"{m.__name__}: Recall: {recall_score(y_test, pred)}")
-        # print(f"{m.__name__}: F1: {f1_score(y_test, pred)}")
-        # print("-"*100)
-        # print(f"{m.__name__}: Con: {confusion_matrix(y_test, pred)}")
-
-        # Create a DataFrame with PassengerId and the corresponding predictions
-        results = pd.DataFrame({'PassengerId': test_df['PassengerId'], 'Survived': np.round(pred).astype(int)})
-
-        # Save the DataFrame to a CSV file
-        results.to_csv(f'{m.__name__}_predictions.csv', index=False)
+    rf.fit(X, y)
+    pred = rf.predict(X_test)
+    # Save the DataFrame to a CSV file
+    results = pd.DataFrame({'PassengerId': test_df['PassengerId'], 'Survived': np.round(pred).astype(int)})
+    results.to_csv(f'rf_predictions.csv', index=False)
 
 
 def encode_data(df, test_df, features):
@@ -69,7 +54,7 @@ def encode_data(df, test_df, features):
 
 def feature_engineer(df):
     df['num_family_onboard'] = df['SibSp'] + df['Parch']
-    df['Age'].fillna(df['Age'].median(), inplace=True)
+    df['Age'].fillna(df['Age'].mean(), inplace=True)
     df['title'] = df['Name'].apply(lambda x: x.split(",")[1].split(".")[0].strip())
     df['is_alone'] = df['num_family_onboard'].apply(lambda x: int(x > 0))
     df['age_category'] = df['Age'].map(map_age_to_weight_category)
