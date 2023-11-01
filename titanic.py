@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-import matplotlib as plt
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
@@ -19,12 +19,11 @@ def main():
 
     # ['PassengerId', 'Survived', 'Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch', 'Ticket', 'Fare', 'Cabin', 'Embarked']
     # ['num_family_onboard', 'age_category_code', 'is_alone']
-    features = ['Pclass', 'Sex_code', 'is_alone']
+    features = ['Pclass', 'Sex_code', 'num_family_onboard', 'age_category_code']
 
     df = feature_engineer(df)
     test_df = feature_engineer(test_df)
     df, test_df = encode_data(df, test_df, None)
-
     X = df[features]
     y = df["Survived"]
 
@@ -33,9 +32,13 @@ def main():
 
     # Create the RandomForestClassifier
     rf = RandomForestClassifier(random_state=42, max_depth=10, n_estimators=100, min_samples_split=2)
+    # xg = xgb.XGBClassifier(random_state=42, max_depth=10, n_estimators=100,)
 
     rf.fit(X, y)
+    # rf.fit(X_train, y_train)
     pred = rf.predict(X_test)
+
+    # print(accuracy_score(y_test, pred))
     # Save the DataFrame to a CSV file
     results = pd.DataFrame({'PassengerId': test_df['PassengerId'], 'Survived': np.round(pred).astype(int)})
     results.to_csv(f'rf_predictions.csv', index=False)
@@ -54,20 +57,28 @@ def encode_data(df, test_df, features):
 
 def feature_engineer(df):
     df['num_family_onboard'] = df['SibSp'] + df['Parch']
-    df['Age'].fillna(df['Age'].mean(), inplace=True)
     df['title'] = df['Name'].apply(lambda x: x.split(",")[1].split(".")[0].strip())
+    df['Age'].fillna(df.groupby('title')['Age'].mean(), inplace=True)
     df['is_alone'] = df['num_family_onboard'].apply(lambda x: int(x > 0))
     df['age_category'] = df['Age'].map(map_age_to_weight_category)
 
+    # Group the data by 'Title' and calculate the average age for each title
+    title_age_avg = df.groupby('title')['Age'].mean()
+
+    # Create a bar plot to visualize the average age for each title
+    # plt.bar(title_age_avg.index, title_age_avg)
+    # plt.xlabel('Title')
+    # plt.ylabel('Average Age')
+    # plt.title('Average Age by Title')
+    # plt.xticks(rotation=45)
+    # plt.show()
     return df
 
 
 def map_age_to_weight_category(age):
     if age < 19:
         return 'child'
-    elif 19 <= age < 30:
-        return 'young_adult'
-    elif 30 <= age < 60:
+    elif 19 <= age < 60:
         return 'adult'
     else:
         return 'senior'
