@@ -11,95 +11,97 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import xgboost as xgb
 import lightgbm as lgb
 from sklearn.model_selection import GridSearchCV
+import sys
+import os
 
 
 def main():
-    df = pd.read_csv('train.csv')
-    test_df = pd.read_csv("test.csv")
+    train_df = pd.read_csv('titanic/data/train.csv')
+    test_df = pd.read_csv("titanic/data/test.csv")
+
+    train_df['dataset'] = "train"
+    test_df['dataset'] = "test"
 
     # ['PassengerId', 'Survived', 'Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch', 'Ticket', 'Fare', 'Cabin', 'Embarked']
-    # ['num_family_onboard', 'age_category_code', 'is_alone']
-    features = ['Pclass', 'Sex_code', 'num_family_onboard', 'age_category_code']
+    # ['num_family_onboard', 'age_cat_code', 'is_alone']
+    features = ['Pclass', 'Sex_code', 'num_family_onboard', 'title_code']
+    
+    joined_df = pd.concat([train_df, test_df])
+    joined_df = feature_engineer(joined_df)
+    
+    joined_df = encode_data(joined_df, ["Sex", 'Embarked', 'age_cat', 'title'])
+    
+    encoder = LabelEncoder()
+    joined_df['Cabin_code'] = encoder.fit_transform(joined_df['Cabin'])
 
-    df = feature_engineer(df)
-    test_df = feature_engineer(test_df)
-    df, test_df = encode_data(df, test_df, None)
-    X = df[features]
-    y = df["Survived"]
+
+    train_df = joined_df[joined_df['dataset'] == 'train'].drop(columns=['dataset'])
+    test_df = joined_df[joined_df['dataset'] == 'test'].drop(columns=['dataset'])
+
+    X = train_df[features]
+    y = train_df["Survived"]
 
     X_test = test_df[features]
     # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
     # Create the RandomForestClassifier
-    rf = RandomForestClassifier(random_state=42, max_depth=10, n_estimators=100, min_samples_split=2)
-    # xg = xgb.XGBClassifier(random_state=42, max_depth=10, n_estimators=100,)
+    # rf = RandomForestClassifier(random_state=42, max_depth=10, n_estimators=100, min_samples_split=2)
+    model = create_model(X.shape[1])
+    xg = xgb.XGBClassifier(random_state=42, max_depth=10, n_estimators=100,)
 
-    rf.fit(X, y)
-    # rf.fit(X_train, y_train)
-    pred = rf.predict(X_test)
+    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='accuracy', patience=5, restore_best_weights=True)
 
+    model.fit(X, y, epochs=20, batch_size=40, callbacks=[early_stopping])
+    xg.fit(X, y)
+    # xg.fit(X_train, y_train)
+    importances = pd.Series(xg.feature_importances_, index = features)
+    importances.plot(kind = 'barh', figsize = (12, 8))
+    plt.show()
+
+    pred = xg.predict(X_test)
+    
     # print(accuracy_score(y_test, pred))
     # Save the DataFrame to a CSV file
     results = pd.DataFrame({'PassengerId': test_df['PassengerId'], 'Survived': np.round(pred).astype(int)})
-    results.to_csv(f'rf_predictions.csv', index=False)
+    results.to_csv(f'titanic/data/rf_predictions.csv', index=False)
+ 
 
-
-def encode_data(df, test_df, features):
-    features = ["Sex", 'Embarked', 'age_category', 'title']
+def encode_data(df, features):
     encoder = LabelEncoder()
-    for feature in features:
-        encoder.fit(pd.concat([df[feature], test_df[feature]], axis=0))
-        df[f'{feature}_code'] = encoder.transform(df[feature])
-        test_df[f'{feature}_code'] = encoder.transform(test_df[feature])
 
-    return df, test_df
+    for feature in features:
+        df[f'{feature}_code'] = encoder.fit_transform(df[feature])
+
+    return df
 
 
 def feature_engineer(df):
     df['num_family_onboard'] = df['SibSp'] + df['Parch']
-    df['title'] = df['Name'].apply(lambda x: x.split(",")[1].split(".")[0].strip())
-    df['Age'].fillna(df.groupby('title')['Age'].mean(), inplace=True)
     df['is_alone'] = df['num_family_onboard'].apply(lambda x: int(x > 0))
-    df['age_category'] = df['Age'].map(map_age_to_weight_category)
 
-    # Group the data by 'Title' and calculate the average age for each title
-    title_age_avg = df.groupby('title')['Age'].mean()
+    df['title'] = df['Name'].apply(lambda x: x.split(",")[1].split(".")[0].strip())
+    df["Age"] = df['Age'].fillna(df.groupby('Sex')['Age'].transform('mean'))
+    df["age_cat"] = pd.cut(df['Age'], bins = [0.0, 19.0, 40.0, 60.0, 80.0], labels = ['0 - 19', '20 - 40', '41 - 61', '61 - 80'])
 
-    # Create a bar plot to visualize the average age for each title
-    # plt.bar(title_age_avg.index, title_age_avg)
-    # plt.xlabel('Title')
-    # plt.ylabel('Average Age')
-    # plt.title('Average Age by Title')
-    # plt.xticks(rotation=45)
-    # plt.show()
+    df['Embarked'] = df["Embarked"].fillna(df["Embarked"].mode())
+    df['Fare'] = df["Fare"].fillna(df["Fare"].mean())
+
     return df
 
 
-def map_age_to_weight_category(age):
-    if age < 19:
-        return 'child'
-    elif 19 <= age < 60:
-        return 'adult'
-    else:
-        return 'senior'
-    
+def create_model(num_features):
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(128, activation='relu', input_shape=(num_features,)),
+        # tf.keras.layers.Dropout(0.5),  # Optional dropout layer for regularization
+        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.Dropout(0.5),  # Optional dropout layer for regularization
+        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.layers.Dense(1, activation='sigmoid')  # Binary classification, so using sigmoid activation
+    ])
 
-# def create_model(num_features):
-#     model = tf.keras.models.Sequential([
-#         tf.keras.layers.Dense(128, activation="relu", input_shape=(num_features,)),
-#         tf.keras.layers.Dense(64, activation="relu"),
-#         tf.keras.layers.Dropout(0.2),
-#         tf.keras.layers.Dense(32, activation="relu"),
-#         tf.keras.layers.Dense(1, activation="sigmoid"),
-#     ])
-
-#     model.compile(
-#         loss="binary_crossentropy",
-#         optimizer="adam",
-#         metrics=["accuracy"]
-#     )
-    
-#     return model
+    # Compile the model
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
 
 
 if __name__ == '__main__':
